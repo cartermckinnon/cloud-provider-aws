@@ -114,7 +114,7 @@ func (c *Cloud) ListRoutes(ctx context.Context, clusterName string) ([]*cloudpro
 		if instanceID != "" {
 			_, found := instances[instanceID]
 			if found {
-				node, err := c.instanceIDToNodeName(InstanceID(instanceID))
+				node, err := c.InstanceIDToNodeName(InstanceID(instanceID))
 				if err != nil {
 					return nil, err
 				}

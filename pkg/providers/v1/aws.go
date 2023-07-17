@@ -451,6 +451,8 @@ type ELBV2 interface {
 type ASG interface {
 	UpdateAutoScalingGroup(*autoscaling.UpdateAutoScalingGroupInput) (*autoscaling.UpdateAutoScalingGroupOutput, error)
 	DescribeAutoScalingGroups(*autoscaling.DescribeAutoScalingGroupsInput) (*autoscaling.DescribeAutoScalingGroupsOutput, error)
+	SetInstanceHealth(*autoscaling.SetInstanceHealthInput) (*autoscaling.SetInstanceHealthOutput, error)
+	DescribeAutoScalingInstances(*autoscaling.DescribeAutoScalingInstancesInput) (*autoscaling.DescribeAutoScalingInstancesOutput, error)
 }
 
 // KMS is a simple pass-through of the Key Management Service client interface,
@@ -543,12 +545,25 @@ type InstanceGroups interface {
 	ResizeInstanceGroup(instanceGroupName string, size int) error
 	// Queries the cloud provider for information about the specified instance group
 	DescribeInstanceGroup(instanceGroupName string) (InstanceGroupInfo, error)
+	// Queries the cloud provider for the instance ID's associated with the specified instance group
+	DescribeInstancesForGroup(instanceGroupName string) ([]InstanceInfo, error)
+
+	GetGroupNameForInstance(instanceID InstanceID) (*string, error)
 }
 
 // InstanceGroupInfo is returned by InstanceGroups.Describe, and exposes information about the group.
 type InstanceGroupInfo interface {
 	// The number of instances currently running under control of this group
 	CurrentSize() (int, error)
+	// The name of the group
+	Name() string
+	// Retrieve a property (tag, label, etc.) from this group.
+	GetProperty(string) (string, bool)
+}
+
+type InstanceInfo interface {
+	ID() InstanceID
+	CreationTimestamp() (metav1.Time, error)
 }
 
 var _ cloudprovider.Interface = (*Cloud)(nil)
@@ -5153,7 +5168,7 @@ func (c *Cloud) nodeNameToInstanceID(nodeName types.NodeName) (InstanceID, error
 	return KubernetesInstanceID(node.Spec.ProviderID).MapToAWSInstanceID()
 }
 
-func (c *Cloud) instanceIDToNodeName(instanceID InstanceID) (types.NodeName, error) {
+func (c *Cloud) InstanceIDToNodeName(instanceID InstanceID) (types.NodeName, error) {
 	if len(instanceID) == 0 {
 		return "", fmt.Errorf("no instanceID provided")
 	}
@@ -5166,7 +5181,7 @@ func (c *Cloud) instanceIDToNodeName(instanceID InstanceID) (types.NodeName, err
 	if err != nil {
 		return "", fmt.Errorf("error getting node with instanceID %q: %v", string(instanceID), err)
 	} else if len(nodes) == 0 {
-		return "", fmt.Errorf("node with instanceID %q not found", string(instanceID))
+		return "", fmt.Errorf("node not found for instanceID %q", string(instanceID))
 	} else if len(nodes) > 1 {
 		return "", fmt.Errorf("multiple nodes with instanceID %q found: %v", string(instanceID), nodes)
 	}

@@ -2711,7 +2711,7 @@ func TestInstanceIDToNodeName(t *testing.T) {
 				awsCloud.nodeInformer.Informer().GetStore().Add(testCase.node)
 			}
 			awsCloud.nodeInformerHasSynced = informerSynced
-			nodeName, err := awsCloud.instanceIDToNodeName(testCase.instanceID)
+			nodeName, err := awsCloud.InstanceIDToNodeName(testCase.instanceID)
 			assert.Equal(t, testCase.expectedNodeName, nodeName)
 			assert.Equal(t, testCase.expectedErr, err)
 		})

@@ -686,6 +686,18 @@ func (a *FakeASG) DescribeAutoScalingGroups(*autoscaling.DescribeAutoScalingGrou
 	panic("Not implemented")
 }
 
+// SetInstanceHealth is not implemented but is required for interface
+// conformance
+func (a *FakeASG) SetInstanceHealth(*autoscaling.SetInstanceHealthInput) (*autoscaling.SetInstanceHealthOutput, error) {
+	panic("Not implemented")
+}
+
+// SetInstanceHealth is not implemented but is required for interface
+// conformance
+func (a *FakeASG) DescribeAutoScalingInstances(*autoscaling.DescribeAutoScalingInstancesInput) (*autoscaling.DescribeAutoScalingInstancesOutput, error) {
+	panic("Not implemented")
+}
+
 // FakeKMS is a fake KMS client used for testing
 type FakeKMS struct {
 	aws *FakeAWSServices

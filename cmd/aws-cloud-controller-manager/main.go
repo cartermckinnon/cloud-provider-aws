@@ -26,8 +26,13 @@ limitations under the License.
 package main
 
 import (
+	"math/rand"
+	"os"
+	"time"
+
 	"k8s.io/apimachinery/pkg/util/wait"
 	cloudprovider "k8s.io/cloud-provider"
+	"k8s.io/cloud-provider-aws/pkg/controllers/autoscalinggroup"
 	"k8s.io/cloud-provider-aws/pkg/controllers/tagging"
 	awsv1 "k8s.io/cloud-provider-aws/pkg/providers/v1"
 	awsv2 "k8s.io/cloud-provider-aws/pkg/providers/v2"
@@ -38,9 +43,6 @@ import (
 	_ "k8s.io/component-base/metrics/prometheus/clientgo" // for client metric registration
 	_ "k8s.io/component-base/metrics/prometheus/version"  // for version metric registration
 	"k8s.io/klog/v2"
-	"math/rand"
-	"os"
-	"time"
 
 	cloudcontrollerconfig "k8s.io/cloud-provider/app/config"
 )
@@ -51,31 +53,40 @@ const (
 
 func main() {
 	rand.Seed(time.Now().UTC().UnixNano())
-
 	logs.InitLogs()
 	defer logs.FlushLogs()
-
 	opts, err := options.NewCloudControllerManagerOptions()
 	if err != nil {
 		klog.Fatalf("unable to initialize command options: %v", err)
 	}
-
 	controllerInitializers := app.DefaultInitFuncConstructors
-	taggingControllerWrapper := tagging.ControllerWrapper{}
-	fss := cliflag.NamedFlagSets{}
-	taggingControllerWrapper.Options.AddFlags(fss.FlagSet("tagging controller"))
+	flagSets := cliflag.NamedFlagSets{}
 
+	// tagging controller
+	taggingControllerWrapper := tagging.ControllerWrapper{}
+	taggingControllerWrapper.Options.AddFlags(flagSets.FlagSet("tagging controller"))
 	taggingControllerConstructor := app.ControllerInitFuncConstructor{
 		InitContext: app.ControllerInitContext{
 			ClientName: tagging.TaggingControllerClientName,
 		},
 		Constructor: taggingControllerWrapper.StartTaggingControllerWrapper,
 	}
-
 	controllerInitializers[tagging.TaggingControllerKey] = taggingControllerConstructor
 	app.ControllersDisabledByDefault.Insert(tagging.TaggingControllerKey)
-	command := app.NewCloudControllerManagerCommand(opts, cloudInitializer, controllerInitializers, fss, wait.NeverStop)
 
+	// autoscaling group controller
+	autoScalingGroupControllerBuilder := autoscalinggroup.AutoScalingGroupControllerBuilder{}
+	autoScalingGroupControllerBuilder.Options.AddFlags(flagSets.FlagSet("autoscaling group controller"))
+	autoScalingGroupControllerConstructor := app.ControllerInitFuncConstructor{
+		InitContext: app.ControllerInitContext{
+			ClientName: autoscalinggroup.AutoScalingGroupControllerClientName,
+		},
+		Constructor: autoScalingGroupControllerBuilder.Constructor,
+	}
+	controllerInitializers[autoscalinggroup.AutoScalingGroupControllerKey] = autoScalingGroupControllerConstructor
+	app.ControllersDisabledByDefault.Insert(autoscalinggroup.AutoScalingGroupControllerKey)
+
+	command := app.NewCloudControllerManagerCommand(opts, cloudInitializer, controllerInitializers, flagSets, wait.NeverStop)
 	if err := command.Execute(); err != nil {
 		klog.Fatalf("unable to execute command: %v", err)
 	}

@@ -21,6 +21,9 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
+	"github.com/aws/aws-sdk-go/service/ec2"
+	ec2api "github.com/aws/aws-sdk-go/service/ec2"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -75,6 +78,106 @@ func (c *Cloud) DescribeInstanceGroup(instanceGroupName string) (InstanceGroupIn
 	return DescribeInstanceGroup(c.asg, instanceGroupName)
 }
 
+// SetHealthOfInstanceInGroup implements InstanceGroups.SetHealthOfInstanceInGroup
+// Reports the instance health to the cloud provider's instance group control plane.
+func SetHealthOfInstanceInGroup(asg ASG, instanceId string, healthy bool) error {
+	input := &autoscaling.SetInstanceHealthInput{
+		InstanceId:   aws.String(instanceId),
+		HealthStatus: aws.String("Healthy"),
+	}
+	if !healthy {
+		input.HealthStatus = aws.String("Unhealthy")
+	}
+	_, err := asg.SetInstanceHealth(input)
+	return err
+}
+
+// SetHealthOfInstanceInGroup implements InstanceGroups.SetHealthOfInstanceInGroup
+// Reports the instance health to the cloud provider's instance group control plane.
+func (c *Cloud) SetHealthOfInstanceInGroup(instanceId string, healthy bool) error {
+	return SetHealthOfInstanceInGroup(c.asg, instanceId, healthy)
+}
+
+// DescribeInstanceGroupsForCluster implements InstanceGroups.DescribeInstanceGroupsForCluster
+// Reports the instance health to the cloud provider's instance group control plane.
+func DescribeInstanceGroupsForCluster(asg ASG, clusterName string) ([]InstanceGroupInfo, error) {
+	req := &autoscaling.DescribeAutoScalingGroupsInput{
+		Filters: []*autoscaling.Filter{
+			{
+				Name:   aws.String("tag-key"),
+				Values: []*string{aws.String(fmt.Sprintf("kubernetes.io/cluster/%s", clusterName))},
+			},
+		},
+	}
+	res, err := asg.DescribeAutoScalingGroups(req)
+	if err != nil {
+		return nil, err
+	}
+	var instanceGroups []InstanceGroupInfo
+	for _, group := range res.AutoScalingGroups {
+		instanceGroups = append(instanceGroups, &awsInstanceGroup{
+			group: group,
+		})
+	}
+	return instanceGroups, nil
+}
+
+// DescribeInstanceGroupsForCluster implements InstanceGroups.DescribeInstanceGroupsForCluster
+// Reports the instance health to the cloud provider's instance group control plane.
+func (c *Cloud) DescribeInstanceGroupsForCluster(clusterName string) ([]InstanceGroupInfo, error) {
+	return DescribeInstanceGroupsForCluster(c.asg, clusterName)
+}
+
+func DescribeInstancesForGroup(ec2 EC2, instanceGroupName string) ([]InstanceInfo, error) {
+	req := &ec2api.DescribeInstancesInput{
+		Filters: []*ec2api.Filter{
+			{
+				Name:   aws.String("tag:aws:autoscaling:groupName"),
+				Values: []*string{aws.String(instanceGroupName)},
+			},
+			{
+				Name:   aws.String("instance-state-name"),
+				Values: []*string{aws.String("running")},
+			},
+		},
+	}
+	res, err := ec2.DescribeInstances(req)
+	if err != nil {
+		return nil, err
+	}
+	var instances []InstanceInfo
+	for _, instance := range res {
+		instances = append(instances, &awsInstanceInfo{
+			instance: instance,
+		})
+	}
+	return instances, nil
+}
+
+func (c *Cloud) DescribeInstancesForGroup(instanceGroupName string) ([]InstanceInfo, error) {
+	return DescribeInstancesForGroup(c.ec2, instanceGroupName)
+}
+
+func GetGroupNameForInstance(asg ASG, instanceID InstanceID) (*string, error) {
+	request := &autoscaling.DescribeAutoScalingInstancesInput{
+		InstanceIds: []*string{aws.String(string(instanceID))},
+	}
+	response, err := asg.DescribeAutoScalingInstances(request)
+	if err != nil {
+		return nil, fmt.Errorf("error describing AWS autoscaling instance (%s): %q", instanceID, err)
+	}
+
+	if len(response.AutoScalingInstances) == 0 {
+		return nil, nil
+	}
+	instance := response.AutoScalingInstances[0]
+	return instance.AutoScalingGroupName, nil
+}
+
+func (c *Cloud) GetGroupNameForInstance(instanceID InstanceID) (*string, error) {
+	return GetGroupNameForInstance(c.asg, instanceID)
+}
+
 // awsInstanceGroup implements InstanceGroupInfo
 var _ InstanceGroupInfo = &awsInstanceGroup{}
 
@@ -86,4 +189,38 @@ type awsInstanceGroup struct {
 // The number of instances currently running under control of this group
 func (g *awsInstanceGroup) CurrentSize() (int, error) {
 	return len(g.group.Instances), nil
+}
+
+// Implement InstanceGroupInfo.Name
+// The name of the autoscaling group
+func (g *awsInstanceGroup) Name() string {
+	return aws.StringValue(g.group.AutoScalingGroupName)
+}
+
+// Implement InstanceGroupInfo.GetProperty
+func (g *awsInstanceGroup) GetProperty(name string) (string, bool) {
+	for _, tag := range g.group.Tags {
+		if aws.StringValue(tag.Key) == name {
+			return aws.StringValue(tag.Value), true
+		}
+	}
+	return "", false
+}
+
+var _ InstanceInfo = &awsInstanceInfo{}
+
+type awsInstanceInfo struct {
+	instance *ec2.Instance
+}
+
+func (i *awsInstanceInfo) ID() InstanceID {
+	return InstanceID(aws.StringValue(i.instance.InstanceId))
+}
+
+func (i *awsInstanceInfo) CreationTimestamp() (metav1.Time, error) {
+	launchTime := i.instance.LaunchTime
+	if launchTime == nil {
+		return metav1.Time{}, fmt.Errorf("instance %s has no launch time", i.ID())
+	}
+	return metav1.NewTime(*launchTime), nil
 }
