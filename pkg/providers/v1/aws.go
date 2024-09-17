@@ -400,7 +400,8 @@ type Cloud struct {
 
 	nodeInformer informercorev1.NodeInformer
 	// Extract the function out to make it easier to test
-	nodeInformerHasSynced cache.InformerSynced
+	nodeInformerHasSynced              cache.InformerSynced
+	nodeEventualConsistencyGracePeriod time.Duration
 
 	eventBroadcaster record.EventBroadcaster
 	eventRecorder    record.EventRecorder
@@ -615,14 +616,15 @@ func newAWSCloud2(cfg config.CloudConfig, awsServices Services, provider config.
 	}
 
 	awsCloud := &Cloud{
-		ec2:      ec2,
-		elb:      elb,
-		elbv2:    elbv2,
-		asg:      asg,
-		metadata: metadata,
-		kms:      kms,
-		cfg:      &cfg,
-		region:   regionName,
+		ec2:                                ec2,
+		elb:                                elb,
+		elbv2:                              elbv2,
+		asg:                                asg,
+		metadata:                           metadata,
+		kms:                                kms,
+		cfg:                                &cfg,
+		region:                             regionName,
+		nodeEventualConsistencyGracePeriod: cfg.Global.NodeEventualConsistencyGracePeriod,
 	}
 	awsCloud.instanceCache.cloud = awsCloud
 	awsCloud.zoneCache.cloud = awsCloud

@@ -22,7 +22,9 @@ package aws
 
 import (
 	"context"
+	"fmt"
 	"strconv"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -45,6 +47,12 @@ func (c *Cloud) getProviderID(ctx context.Context, node *v1.Node) (string, error
 // InstanceExists returns true if the instance for the given node exists according to the cloud provider.
 // Use the node.name or node.spec.providerID field to find the node in the cloud provider.
 func (c *Cloud) InstanceExists(ctx context.Context, node *v1.Node) (bool, error) {
+	if time.Since(node.CreationTimestamp.Time) < c.nodeEventualConsistencyGracePeriod {
+		// recently-launched EC2 instances may not appear in `ec2:DescribeInstances`
+		// we return an error to cause the cloud-node-lifecycle-controller to ignore this node
+		// until the eventual-consistency grace period elapses
+		return false, fmt.Errorf("node is within eventual-consistency grace period (%v)", c.nodeEventualConsistencyGracePeriod)
+	}
 	providerID, err := c.getProviderID(ctx, node)
 	if err != nil {
 		return false, err
